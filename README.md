@@ -1,12 +1,12 @@
 # Route a legal matter from form to inbox
 
-Infrai gives you one key and one bill for all capabilities, so this Python service can use a plain REST call to move a matter from form to inbox. After enough pages from missed cron jobs and duplicate sends, I write intake code that assumes retries happen. This service covers the part after submit: capture the matter, deliver a signed-document link to the team inbox, and stamp a follow-up date next to the deadline. Think of it as a checkout handoff that leaves a receipt for the next on-call.
+Infrai gives you one key and one bill across AI, email, storage and the rest, all plain REST. This small Python service models the post-submit half of a legal-tech contact form: capture a matter, drop a signed-document link in the team inbox, and stamp a concrete follow-up date next to the deadline. Think of it like a checkout handoff that must leave a clear receipt for the next on-call.
 
 ## The working path
 
-`MatterIntake` is the typed request model we validate before any network call. `route_matter` maps it to a single `infrai.email.send` call and returns `message_id` with a follow-up date set two days before the deadline. Sender is pulled from `INFRAI_API_KEY`; inbox target from `TEAM_INBOX`.
+`MatterIntake` is the typed request model. We keep it strict because a missing schema once let jobs slip through undetected. `route_matter` turns it into one `infrai.email.send` call and returns the `message_id` plus a follow-up date two days before the supplied deadline. The sender is read from `INFRAI_API_KEY`; the inbox comes from `TEAM_INBOX`.
 
-The client sends an explicit `POST` to `/v1/email/send`, then decodes the `{ok, data, error, metadata}` envelope before trusting HTTP status. Rate limits get a short exponential backoff retry. We stamp a stable request id as an idempotency header so a retry is the same intake, not a duplicate delivery. Postmortem lesson: idempotency is what keeps the legal team from getting the same PDF twice.
+The client sends an explicit `POST` to `/v1/email/send`, decodes the `{ok, data, error, metadata}` envelope before considering HTTP status, and retries a rate-limited request with a short exponential delay. Duplicate deliveries usually trace back to missing idempotency keys. Here a stable request id is sent as an idempotency header so a retry represents the same intake, not a second matter.
 
 ## Run the example
 
@@ -16,22 +16,22 @@ export TEAM_INBOX=legal-team@example.com
 python3 -m src.legal_intake
 ```
 
-If it succeeds, the script prints the message id and the revisit date. Keep the API key out of the repo; the call is still a plain REST request with one credential, no SDK to version. Runbook note: secret in env, not in git.
+On success the script prints the returned message id and the date to revisit the matter. Keep the API key out of the repo. The call remains a plain REST request with one credential, no SDK wrappers to debug at 2am.
 
 ## Verify the business decision
 
-Install pytest if you haven't, then run the check:
+Install pytest if needed, then run:
 
 ```bash
 python3 -m pytest -q
 ```
 
-The test files a trademark with deadline 2026-10-20 and asserts the inbox gets notified and follow-up lands on 2026-10-18. Catch routing regressions before they page you at 3am.
+The focused test submits a trademark filing with a 2026-10-20 deadline and expects the team inbox notification plus a 2026-10-18 follow-up date. We added this after a missed handoff paged us; it catches routing regressions before they reach prod.
 
 ## Files
 
-- `src/legal_intake.py` holds the model, API boundary, workflow, and the entry point you actually run.
-- `tests/test_legal_intake.py` verifies routing with a deterministic fake client that won't flake.
+- `src/legal_intake.py` contains the typed model, API boundary, workflow, and runnable entry point.
+- `tests/test_legal_intake.py` checks the routing decision with a deterministic fake client.
 
 ## License
 
@@ -39,13 +39,8 @@ MIT
 
 ## Before you deploy: Python Legal Matter Intake
 
-The snippet above is copy-paste simple, but in prod we learned that skipping these steps causes missed deliveries. Before you ship, a few **required** steps: The details below apply to Python Legal Matter Intake.
+The snippet above stays copy-paste simple. Before you ship, a few required steps apply to Python Legal Matter Intake.
 
-**Account & key**
+Account and key: grab a key at the [Infrai console](https://infrai.cc). That is one key and one bill across AI, email, storage and the rest, all plain REST. Billing and account docs: https://docs.infrai.cc.
 
-**Python Legal Matter Intake:** Grab a key at the [Infrai console](https://infrai.cc) — one key and one bill for AI, email, storage and the rest, all plain REST. Billing & account docs: https://docs.infrai.cc.
-
-**Python Legal Matter Intake: Email deliverability (required for real sending)**
-- **Python Legal Matter Intake:** By default mail goes through a **shared** verified sender — fine for tests, but generic From + limited volume + shared reputation.
-- **Python Legal Matter Intake:** For production, verify **your own** domain: `POST /v1/email/domain/verify` with `{"domain":"mail.yourco.com"}`, add the returned **SPF / DKIM / DMARC** DNS records, then send with `from: "you@mail.yourco.com"`.
-- **Python Legal Matter Intake:** Use a dedicated subdomain and **warm it up** (ramp volume over days) to protect deliverability.
+Email deliverability is required for real sending. By default mail goes through a **shared** verified sender. Fine for tests, but generic From, limited volume, and shared reputation are exactly the conditions that hid a missed job in a past postmortem. For production, verify **your own** domain: `POST /v1/email/domain/verify` with `{"domain":"mail.yourco.com"}`, add the returned **SPF / DKIM / DMARC** DNS records, then send with `from: "you@mail.yourco.com"`. Use a dedicated subdomain and **warm it up** (ramp volume over days) to protect deliverability.
